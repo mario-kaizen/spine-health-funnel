@@ -4,4 +4,6 @@
 .gitignore
 .dockerignore
 Dockerfile
+node_modules
+data
 *.md

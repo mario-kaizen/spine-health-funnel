@@ -339,7 +339,7 @@ footer a{color:#fff}
       <p class="soft-ask">Start here. Add your details, then pick a time that suits you.</p>
     </div>
     <p class="reassure">No lock in, no pressure. If Dr Bader does not think he can help, he will tell you on the day.</p>
-    <form class="form-card" action="thank-you.html" method="get">
+    <form class="form-card" id="leadform" action="/thank-you.html" method="get">
       <label for="fn">First name</label>
       <input id="fn" name="first_name" type="text" autocomplete="given-name" required>
       <label for="ph">Phone</label>
@@ -397,6 +397,40 @@ footer a{color:#fff}
 <div class="mobilecta">
   <a href="#book" class="btn">Book your $80 first visit</a>
 </div>
+
+<script>
+/* page-visit beacon */
+(function(){
+  function ck(n){ return (document.cookie.match('(^|; )'+n+'=([^;]+)')||[])[2]; }
+  function vid(){
+    var m=document.cookie.match('(^|; )shc_vid=([^;]+)'); if(m) return m[2];
+    var id='v_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10);
+    document.cookie='shc_vid='+id+';path=/;max-age=31536000;SameSite=Lax'; return id;
+  }
+  var q=new URLSearchParams(location.search);
+  try{ fetch('/api/track',{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({
+    visitorId:vid(), page:'landing', url:location.href, referrer:document.referrer,
+    utmSource:q.get('utm_source'), utmMedium:q.get('utm_medium'), utmCampaign:q.get('utm_campaign'),
+    utmContent:q.get('utm_content'), utmTerm:q.get('utm_term'), fbc:ck('_fbc'), fbp:ck('_fbp')
+  })}); }catch(e){}
+})();
+/* lead submit: fire browser Lead, POST to GHL, then thank-you */
+(function(){
+  var form=document.getElementById('leadform'); if(!form) return;
+  function ck(n){ return (document.cookie.match('(^|; )'+n+'=([^;]+)')||[])[2]; }
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var btn=form.querySelector('button[type=submit]'); if(btn){ btn.disabled=true; btn.textContent='Booking your visit...'; }
+    var eventId=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():(Date.now()+'-'+Math.random().toString(36).slice(2));
+    try{ if(window.fbq) fbq('track','Lead',{},{eventID:eventId}); }catch(_){}
+    var body={ firstName:form.first_name.value, phone:form.phone.value, email:form.email.value,
+      eventId:eventId, fbp:ck('_fbp'), fbc:ck('_fbc'), eventSourceUrl:location.href };
+    var go=function(){ location.href='/thank-you.html'; };
+    fetch('/api/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(go).catch(go);
+    setTimeout(go,2500);
+  });
+})();
+</script>
 
 </body>
 </html>
