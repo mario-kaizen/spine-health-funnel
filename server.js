@@ -103,26 +103,10 @@ app.post('/api/lead', async (req, res) => {
     else { ghlStatus = 'error:' + r.status; console.error('GHL contact error', r.status, JSON.stringify(j).slice(0, 300)); }
   } catch (e) { ghlStatus = 'error:exception'; console.error('GHL contact exception', e.message); }
 
-  // 2b. place an opportunity in the New Patient Pipeline (best-effort, decoupled from the contact)
-  if (contactId && process.env.GHL_PIPELINE_ID && process.env.GHL_STAGE_ID) {
-    try {
-      await fetch('https://services.leadconnectorhq.com/opportunities/', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.GHL_PIT}`,
-          Version: '2021-07-28', 'Content-Type': 'application/json', Accept: 'application/json'
-        },
-        body: JSON.stringify({
-          pipelineId: process.env.GHL_PIPELINE_ID,
-          locationId: process.env.GHL_LOCATION_ID,
-          pipelineStageId: process.env.GHL_STAGE_ID,
-          name: `${firstName || 'New lead'} - $80 first visit`,
-          status: 'open',
-          contactId
-        })
-      });
-    } catch (e) { console.error('GHL opportunity exception', e.message); }
-  }
+  // 2b. Opportunity creation is intentionally NOT done here.
+  //     The funnel-lead tag (set above) triggers the "Pipeline | 01. New Lead" workflow,
+  //     whose Create Opportunity step is the single source of pipeline entry. Keeping it
+  //     in one place avoids a second opp being created/renamed on the same contact.
 
   if (leadRowId && updLead) { try { updLead.run({ id: leadRowId, cid: contactId, status: ghlStatus }); } catch (e) {} }
 
