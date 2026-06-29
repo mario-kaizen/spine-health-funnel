@@ -9,6 +9,9 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { summarizeCapi } = require('./lib/capi');
+const { buildStats } = require('./lib/build-stats');
+const FUNNEL_META = { slug: 'spine-health', name: 'Spine & Health Co', host: 'join.spineandhealthco.com',
+                      pixelId: process.env.META_PIXEL_ID, ghlLocationId: process.env.GHL_LOCATION_ID };
 
 const app = express();
 app.set('trust proxy', true);
@@ -148,13 +151,9 @@ app.post('/api/lead', async (req, res) => {
 // ---------- stats read-back (secret-gated) ----------
 app.get('/api/stats', (req, res) => {
   if (!process.env.STATS_SECRET || req.query.secret !== process.env.STATS_SECRET) return res.status(401).json({ ok: false });
-  if (!db) return res.json({ ok: true, note: 'no db', visits: 0, leads: 0 });
-  const visits = db.prepare('SELECT COUNT(*) n FROM visits').get().n;
-  const leads = db.prepare('SELECT COUNT(*) n FROM leads').get().n;
-  const visitsToday = db.prepare("SELECT COUNT(*) n FROM visits WHERE created_at >= datetime('now','start of day')").get().n;
-  const ghlSynced = db.prepare("SELECT COUNT(*) n FROM leads WHERE ghl_contact_id IS NOT NULL").get().n;
-  const recent = db.prepare('SELECT created_at, utm_source, utm_campaign FROM visits ORDER BY id DESC LIMIT 10').all();
-  res.json({ ok: true, visits, visitsToday, leads, ghlSynced, conversion: visits ? +(leads / visits).toFixed(4) : 0, recent });
+  if (!db) return res.status(503).json({ ok: false, error: 'no db' });
+  try { res.json(buildStats(db, FUNNEL_META)); }
+  catch (e) { console.error('stats error', e.message); res.status(500).json({ ok: false }); }
 });
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
