@@ -8,13 +8,14 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { summarizeCapi } = require('./lib/capi');
 
 const app = express();
 app.set('trust proxy', true);
 app.use(express.json({ limit: '64kb' }));
 
 // ---------- SQLite (optional, never fatal) ----------
-let db = null, insVisit = null, insLead = null, updLead = null;
+let db = null, insVisit = null, insLead = null, updLead = null, updLeadCapi = null;
 try {
   const Database = require('better-sqlite3');
   const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'funnel.db');
@@ -42,6 +43,11 @@ try {
   insLead = db.prepare(`INSERT INTO leads (first_name,email,phone,event_id,fbc,fbp,ip,user_agent,ghl_status)
     VALUES (@first_name,@email,@phone,@event_id,@fbc,@fbp,@ip,@user_agent,'pending')`);
   updLead = db.prepare(`UPDATE leads SET ghl_contact_id=@cid, ghl_status=@status WHERE id=@id`);
+  // additive migration: leads.capi_status / leads.capi_received (idempotent)
+  for (const col of ['capi_status TEXT', 'capi_received INTEGER']) {
+    try { db.exec(`ALTER TABLE leads ADD COLUMN ${col}`); } catch (e) { /* already exists */ }
+  }
+  updLeadCapi = db.prepare('UPDATE leads SET capi_status=@status, capi_received=@received WHERE id=@id');
   console.log('sqlite ready at', DB_PATH);
 } catch (e) {
   console.error('sqlite unavailable, continuing without local logging:', e.message);
@@ -111,6 +117,7 @@ app.post('/api/lead', async (req, res) => {
   if (leadRowId && updLead) { try { updLead.run({ id: leadRowId, cid: contactId, status: ghlStatus }); } catch (e) {} }
 
   // 3. Meta CAPI Lead (same event_id as the browser pixel, so Meta dedupes)
+  let capiResp = null;
   if (eventId && process.env.META_PIXEL_ID && process.env.META_CAPI_TOKEN) {
     try {
       const payload = {
@@ -124,9 +131,14 @@ app.post('/api/lead', async (req, res) => {
         }],
         ...(process.env.META_TEST_EVENT_CODE ? { test_event_code: process.env.META_TEST_EVENT_CODE } : {})
       };
-      await fetch(`https://graph.facebook.com/v20.0/${process.env.META_PIXEL_ID}/events?access_token=${process.env.META_CAPI_TOKEN}`,
+      const r = await fetch(`https://graph.facebook.com/v20.0/${process.env.META_PIXEL_ID}/events?access_token=${process.env.META_CAPI_TOKEN}`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    } catch (e) { console.error('CAPI exception', e.message); }
+      capiResp = await r.json().catch(() => ({}));
+    } catch (e) { console.error('CAPI exception', e.message); capiResp = { error: { message: e.message } }; }
+  }
+  if (leadRowId && updLeadCapi) {
+    const s = summarizeCapi(capiResp);
+    try { updLeadCapi.run({ id: leadRowId, status: s.status, received: s.received }); } catch (e) {}
   }
 
   // success as long as the lead reached GHL (or was saved locally to recover)
